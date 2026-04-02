@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --bg: #0b0b0b;
@@ -512,6 +513,44 @@
     z-index: 100;
   }
 
+  /* ── Sending / Loading State ─────────────────── */
+  .sending-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 60vh;
+    gap: 20px;
+  }
+  .spinner {
+    width: 36px;
+    height: 36px;
+    border: 2px solid rgba(255,255,255,0.08);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sending-label {
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    font-weight: 400;
+  }
+
+  /* ── Error Banner ─────────────────────────────── */
+  .send-error {
+    background: rgba(224,82,82,0.1);
+    border: 1px solid rgba(224,82,82,0.3);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 13px;
+    color: #e05252;
+    line-height: 1.6;
+    margin-top: 8px;
+  }
+
   /* ── Shake Animation ──────────────────────────── */
   @keyframes shake {
     0%,100% { transform: translateX(0); }
@@ -618,6 +657,66 @@
 <script>
 // ─── Grab logo HTML from template ─────────────────────
 const LOGO_HTML = document.getElementById('logo-svg-tpl').innerHTML;
+
+// ──────────────────────────────────────────────────────
+// EMAILJS CONFIG  ← replace these three values
+// ──────────────────────────────────────────────────────
+const EJS_PUBLIC_KEY  = 'YOUR_PUBLIC_KEY';   // Account → API Keys
+const EJS_SERVICE_ID  = 'YOUR_SERVICE_ID';   // Email Services → Service ID
+const EJS_TEMPLATE_ID = 'YOUR_TEMPLATE_ID';  // Email Templates → Template ID
+
+// ──────────────────────────────────────────────────────
+// BUILD EMAIL BODY
+// ──────────────────────────────────────────────────────
+function buildEmailBody() {
+  const SECTION_GROUPS = [
+    { name: 'CLIENT & PROJECT BASICS',    ids: [1,2,3,4,5,6,7]        },
+    { name: 'PROJECT OVERVIEW & GOALS',   ids: [8,9,10,11]             },
+    { name: 'SCOPE & FEATURES',           ids: [12,13,14,15]           },
+    { name: 'DESIGN & BRAND',             ids: [16,17,18,19,20,21]     },
+    { name: 'DEVELOPMENT',                ids: [22,23,24,25,26,27,28]  },
+    { name: 'PLATFORM PROJECTS ONLY',     ids: [29,30,31,32]           },
+    { name: 'TIMELINE & BUDGET',          ids: [33,34,35,36]           },
+  ];
+
+  const qMap = {};
+  QUESTIONS.forEach(q => { qMap[q.id] = q; });
+
+  let body = `New client intake submission\nSubmitted: ${new Date().toLocaleString('en-US', { dateStyle:'long', timeStyle:'short' })}\n\n`;
+
+  SECTION_GROUPS.forEach(sec => {
+    body += `\n${'─'.repeat(42)}\n${sec.name}\n${'─'.repeat(42)}\n\n`;
+    sec.ids.forEach(id => {
+      const q   = qMap[id];
+      const ans = answers[id];
+      if (ans !== undefined && ans !== '') {
+        body += `${q.q}\n${ans}\n\n`;
+      } else {
+        body += `${q.q}\n(not answered)\n\n`;
+      }
+    });
+  });
+
+  return body;
+}
+
+// ──────────────────────────────────────────────────────
+// SEND EMAIL VIA EMAILJS
+// ──────────────────────────────────────────────────────
+async function sendEmail() {
+  emailjs.init({ publicKey: EJS_PUBLIC_KEY });
+
+  const companyName = answers[1] || 'New Client';
+
+  return emailjs.send(EJS_SERVICE_ID, EJS_TEMPLATE_ID, {
+    to_email:     'nss@rumoravenue.com',
+    cc_email:     'serena@rumoravenue.com',
+    subject:      `New intake — ${companyName}`,
+    company_name: companyName,
+    message:      buildEmailBody(),
+    reply_to:     answers[3] || '',
+  });
+}
 
 // ──────────────────────────────────────────────────────
 // DATA
@@ -861,7 +960,12 @@ function renderThankyou() {
     <div class="ty-check">✓</div>
     <div class="welcome-logo" style="margin-bottom:28px">${LOGO_HTML}</div>
     <h1 class="welcome-title" style="font-size:clamp(32px,6vw,58px)">You're all set.</h1>
-    <p class="welcome-sub">We've got everything we need to get started. Our team will review your answers and be in touch within 1–2 business days.</p>`;
+    <p class="welcome-sub">Your intake has been submitted. Navroop will be in touch within 2 business days.</p>`;
+}
+
+async function showThankyou() {
+  await mountScreen(renderThankyou(), 'instant');
+  confetti();
 }
 
 // ──────────────────────────────────────────────────────
@@ -964,12 +1068,35 @@ async function goNext() {
   const next = qIndex + 1;
 
   if (next >= QUESTIONS.length) {
+    // Show sending state
     stage = 'thankyou';
     syncUI();
-    await mountScreen(renderThankyou(), 'fwd');
-    confetti();
+    await mountScreen(`<div class="sending-screen"><div class="spinner"></div><div class="sending-label">Submitting your intake…</div></div>`, 'fwd');
+
     console.log('%c📋 Rumor — Client Intake Submission', 'font-weight:700;font-size:14px;color:#2D6CDF');
     console.log(JSON.stringify(answers, null, 2));
+
+    try {
+      await sendEmail();
+    } catch (err) {
+      console.error('EmailJS error:', err);
+      // Show error state with option to continue anyway
+      await mountScreen(`
+        <div class="sending-screen">
+          <div class="welcome-logo" style="margin-bottom:24px">${LOGO_HTML}</div>
+          <div class="send-error">
+            Could not send the email automatically.<br>
+            Please forward your answers to <strong>nss@rumoravenue.com</strong>
+          </div>
+          <div class="btn-row" style="justify-content:center;margin-top:8px">
+            <button class="btn-primary" onclick="showThankyou()">Continue</button>
+          </div>
+        </div>`, 'instant');
+      busy = false;
+      return;
+    }
+
+    await showThankyou();
     busy = false;
     return;
   }
